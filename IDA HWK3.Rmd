@@ -1,0 +1,372 @@
+---
+title: "Incomplete Data Analysis Assignment 3"
+author: "Stephen Gallagher"
+date: "S2116339"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(eval = TRUE, echo = TRUE)
+library(mice)
+library(rjags)
+library(knitr)
+library(JointAI)
+library(corrplot)
+library(tidyr)
+library(dplyr)
+```
+
+## Question 1a
+```{r, fig.align='center'}
+# Loading dataset
+data(nhanes)
+# Calculating number of incomplete cases
+incomplete <- sum(!complete.cases(nhanes))
+# Calculating percentage of incomplete cases
+incomplete_percentage <- incomplete/nrow(nhanes)
+# Visualizing complete and incomplete cases
+mdpat_mice = md.pattern(nhanes) 
+```
+
+There are a total of 25 cases, of which there are 12 incomplete cases. Therefore, 48% of the cases in the data set are incomplete.
+
+## Question 1b
+Using the code below to calculate the proportions of variance due to the missing data for each parameter:
+```{r, fig.align='center'}
+# Imputing missing values
+imps <- mice(nhanes, printFlag=FALSE, seed=1)
+# Predicting bmi with normal lm
+fits <- with(imps, lm(bmi ~ age + hyp + chl))
+# Combining analyses to final estimates
+ests1 <- pool(fits)
+# Outputting table with relevant parameters
+ests1[,3][c(1,10)]
+```
+We can see that predicting `bmi` from `age`, `hyp`, and `chl` results in the following values for the proportions of variance due to the missing data for each parameter:
+
+* `age = 0.6864`
+* `hyp = 0.3504`
+* `chl = 0.3041`
+
+We can therefore conclude that the parameter most affected by the nonresponse is `age` (`age` has the highest value for $\lambda$), and the parameter least affected by the nonresponse is `chl`.
+
+## Question 1c
+We repeat the analysis above for `seed ∈ {2,3,4,5,6}`, producing a table of the values for lambda when setting the seed to 2, 3, 4, 5, and 6 respectively.
+```{r, fig.align='center'}
+# Using M=5 and changing the seed
+ests2 <- pool(with(mice(nhanes, printFlag=FALSE, seed=2), lm(bmi~age+hyp+chl)))
+ests3 <- pool(with(mice(nhanes, printFlag=FALSE, seed=3), lm(bmi~age+hyp+chl)))
+ests4 <- pool(with(mice(nhanes, printFlag=FALSE, seed=4), lm(bmi~age+hyp+chl)))
+ests5 <- pool(with(mice(nhanes, printFlag=FALSE, seed=5), lm(bmi~age+hyp+chl)))
+ests6 <- pool(with(mice(nhanes, printFlag=FALSE, seed=6), lm(bmi~age+hyp+chl)))
+
+# Outputting table with relevant parameters
+knitr::kable(list(ests2[,3][c(1,10)], ests3[,3][c(10)], 
+                  ests4[,3][c(10)], ests5[,3][c(10)], ests6[,3][c(10)]))
+```
+It is clear that the conclusions remain the same for seeds 2, 3, and 6, as the `age` parameter has the highest value for $\lambda$ with values $\lambda = 0.4033$ for `seed=2`, $\lambda = 0.5895$ for `seed=3`, and $\lambda = 0.6550$ for `seed=6`.
+
+However, the conclusions changed for seeds 4 and 5, as the highest value for $\lambda$ for `seed=4` corresponded to the parameter `chl` ($\lambda = 0.3305$), and for `seed=5` corresponded to the parameter `hyp` ($\lambda = 0.5943$). 
+
+## Question 1d
+```{r, fig.align='center'}
+# Using M=100 and changing the seed
+ests1_m100 <- pool(with(mice(nhanes, printFlag=FALSE, seed=2, m=100), lm(bmi~age+hyp+chl)))
+ests2_m100 <- pool(with(mice(nhanes, printFlag=FALSE, seed=2, m=100), lm(bmi~age+hyp+chl)))
+ests3_m100 <- pool(with(mice(nhanes, printFlag=FALSE, seed=3, m=100), lm(bmi~age+hyp+chl)))
+ests4_m100 <- pool(with(mice(nhanes, printFlag=FALSE, seed=4, m=100), lm(bmi~age+hyp+chl)))
+ests5_m100 <- pool(with(mice(nhanes, printFlag=FALSE, seed=5, m=100), lm(bmi~age+hyp+chl)))
+ests6_m100 <- pool(with(mice(nhanes, printFlag=FALSE, seed=6, m=100), lm(bmi~age+hyp+chl)))
+
+# Outputting table with relevant parameters
+knitr::kable(list(ests1_m100[,3][c(1,10)], ests2_m100[,3][c(1,10)], ests3_m100[,3][c(10)],
+                  ests4_m100[,3][c(10)], ests5_m100[,3][c(10)], ests6_m100[,3][c(10)]))
+```
+When repeating the analysis using the same seeds but with $M = 100$ this time instead of $M = 5$ (where $M$ denotes the number of imputed datasets by mice) we can see that the `age` parameter yields the highest value for $\lambda$ for seeds $1, 2, 4, 5, 6$ with values $\lambda = 0.4031, 0.4031, 0.3943, 0.3323, 0.4430$ respectively. When setting `seed = 3`, however, the highest value for $\lambda$ corresponded to the parameter `chl` with a value of $\lambda = 0.3282$, which is a similar result for `seed = 3` when $M = 5$. 
+
+In other words, when setting $M = 100$ we find that the `age` parameter is most affected by the nonresponse for `seed = 1, 2, 4, 5, 6` and the `chl` parameter is most affected by the nonresponse for  `seed = 3`. 
+
+We can conclude that although the computation time increases with higher values of $M$, the choice of $M = 100$ is preferred over $M = 5$, as we have shown that the results for $\lambda$ when $M = 5$ differed between various values for the random seed. When setting $M = 100$, however, we get more consistent results, therefore we must increase the value for $M$ to maintain statistical efficiency and reproducibility. 
+
+## Question 2
+In this section we focus on calculating the empirical coverage probability of the 95% confidence intervals for $\beta_1$ under the following two approaches: stochastic regression imputation and the corresponding bootstrap based version (using $M = 20$ and `seed=1`).
+```{r, fig.align='center'}
+# Loading dataset
+load('dataex2.Rdata')
+
+for (i in 1:100){
+  # SRI and bootstrap methods
+  imp_nob <- mice(dataex2[,,i], printFlag=FALSE, m=20, seed=1, method = "norm.nob")
+  imp_boot <- mice(dataex2[,,i], printFlag=FALSE, m=20, seed=1, method = "norm.boot")
+
+  # Computing 95% CI's
+  CI_sri <- summary(pool(with(imp_nob, lm(Y ~ X))), conf.int=TRUE)
+  CI_boot <- summary(pool(with(imp_boot, lm(Y ~ X))), conf.int=TRUE)
+
+  # Computing proportion of true values of beta1=3 in the 95% CI's
+  true_sri <- 0
+  true_boot <- 0
+  
+  # Adding an additional count if the 95% CI contains the true value of beta1
+  if (CI_sri$`2.5 %`[2] <= 3 & CI_sri$`97.5 %`[2] >= 3){
+    true_sri = true_sri + 1
+  }
+  if (CI_boot$`2.5 %`[2] <= 3 & CI_boot$`97.5 %`[2] >= 3){
+    true_boot = true_boot + 1
+  }
+}
+```
+Under the SRI approach, the 95% CI contains the true value of the parameter ($\beta_1 = 3$) 88% of the time (i.e. `true_sri=88`) over the 100 intervals. Under the bootstrap approach, the 95% CI contains the true value of the parameter ($\beta_1 = 3$) 95% of the time (i.e. `true_boot=95`) over the 100 intervals. 
+
+The SRI method produces a lower empirical coverage probability in comparison to the bootstrap approach because the bootstrap approach takes into account the parameter uncertainty, unlike the SRI method which assumes to know the true value of the imputed values without any uncertainty.
+
+## Question 3
+According to Rubin's rules, the multiple imputation estimate of $\theta$, denoted by $\hat{\theta}^{{MI}}$, is the average of the $M$ individual estimates:
+
+\begin{align*}
+  \hat{\theta}^{{MI}} = \frac{1}{M}\sum_{m=1}^{M}\hat{\theta}^{(m)}
+\end{align*} 
+
+where $\hat{\theta}^{(m)}$ denotes the estimate of $\theta$ obtained from the $m^{th}$ ($m=1,...,M$) complete dataset.
+
+For a linear (in the coefficients) regression model, we have that
+\begin{align*}
+  \hat{\theta}^{(m)} = \hat{\beta}_{0}^{(m)} + \sum_{i=1}^{n} \hat{\beta}_{i}^{(m)}x_{i} + \epsilon \ \ \ \ \ (\epsilon \sim \mathcal{N}(0, \sigma^2))
+\end{align*}
+
+Subbing in this equation for $\hat{\theta}^{(m)}$ into the equation of $\hat{\theta}^{MI}$, we have that:
+
+\begin{align*}
+\hat{\theta}^{{MI}} = \frac{1}{M} \sum_{m=1}^M  (\hat{\beta}_{0}^{(m)} + \hat{\beta}_{i}^{(m)}x_{i} + \epsilon)\\ = \frac{1}{M} \sum_{m=1}^M \hat{\beta}_{0}^{(m)} + \frac{1}{M}\sum_{m=1}^M  \hat{\beta}_{i}^{(m)}\sum_{i=1}^{n}x_{i} + \frac{1}{M}\sum_{m=1}^M\epsilon\\
+\end{align*}
+
+Hence we obtain that $\hat{\theta}^{MI}$ is the vector of pooled point estimates, pooling the regression coefficients according to Rubin's rules. 
+
+Therefore, the two strategies coincide.
+
+## Question 4a
+Here we impute on $y$ and $x_1$ (i.e. excluding $x_2$) and provide the estimates of $\beta_1$, $\beta_2$ and $\beta_3$ along with 95% confidence intervals using $M = 50$ and `seed=1`.
+```{r, fig.align='center'}
+# Loading dataset
+load('dataex4.Rdata')
+# Imputing missing values of y, x1 and x2
+int_imp0 <- mice(dataex4, printFlag=FALSE, m=50, seed=1, maxit=0)
+# x2 will not be used as predictor
+int_imp0$predictorMatrix["x2",] <- 0
+# Imputing missing values of y and x1 (excluding x2)
+int_imp <- mice(dataex4, m=50, seed=1, printFlag=FALSE, predictorMatrix=int_imp0$predictorMatrix)
+# Predicting y with normal lm
+int_fit <- with(int_imp, lm(y ~ x1 + x2 + x1*x2))
+# Combining analyses to final estimates
+int_ests <- pool(int_fit)
+# Outputting summary statistics
+stats_a <- summary(int_ests, conf.int=TRUE)[, c(2, 7, 8)]
+rownames(stats_a) = c("beta0", "beta1", "beta2", "beta3")
+stats_a
+```
+We obtain the following estimates and 95% confidence intervals:
+
+* $\beta_1 = 1.4112$ with 95% CI: [1.2194, 1.6031]
+* $\beta_2 = 1.9658$ with 95% CI: [1.8607, 2.0710]
+* $\beta_3 = 0.7550$ with 95% CI: [0.6423, 0.8678]
+
+Recalling that the true values of the parameters are $\beta_1 = 1$, $\beta_2 = 2$ and $\beta_3 = 1$, it is clear that the 95% CI for $\beta_2$ is the only confidence interval containing the true value of it's parameter. Additionally, the estimate for $\beta_2$ is sufficiently close to the true value. In contrast to this result, we can see that the 95% CI's for $\beta_1$ and $\beta_3$ don't include the true value of their respective parameters, as well their parameter estimates being relatively inaccurate.
+
+These results are to be expected considering the $x_2$ variable wasn't imputed, and the imputed values can be expected to lead to more biased parameter estimates.
+
+## Question 4b
+After calculating the interaction variable and appending it to the dataset, we use passive imputation to impute the interaction variable and provide estimates for $\beta_1$, $\beta_2$, and $\beta_3$ along with 95% confidence intervals using using $M = 50$ and `seed=1`.
+```{r, fig.align='center'}
+# Appending interaction variable to dataset
+dataex4$x1x2 <- dataex4$x1 * dataex4$x2
+# Dry run of mice without iterations
+imp0 <- mice(dataex4, maxit = 0, seed=1, m=50)
+# Extracting the method
+meth <- imp0$method
+# Imputing on the interaction variable
+meth["x1x2"] = "~I(x1*x2)"
+# Modifying predictor matrix
+pred <- imp0$predictorMatrix
+# x1x2 will not be used as predictor
+pred[c("x1", "x2"), "x1x2"] <- 0
+# Don't include all three terms as predictor variables, avoid multi-collinearity
+pred["x1x2", "y"] <- 0
+# Passive imputation on interaction variable
+imp_x1x2 = mice(dataex4, method = meth, predictorMatrix = pred, m = 50, seed = 1, printFlag = FALSE)
+# Predicting y with normal lm
+imp_x1x2_fit = with(imp_x1x2, lm(y ~ x1 + x2 + x1x2))
+# Combining analyses to final estimates
+imp_x1x2_ests <- pool(imp_x1x2_fit)
+# Outputting summary statistics
+stats_b <- summary(imp_x1x2_ests, conf.int=TRUE)[, c(2, 7, 8)]
+rownames(stats_b) = c("beta0", "beta1", "beta2", "beta3")
+stats_b
+```
+We obtain the following estimates and 95% confidence intervals:
+
+* $\beta_1 = 0.9762$ with 95% CI: [0.6992, 1.2532]
+* $\beta_2 = 1.6168$ with 95% CI: [1.4688, 1.7648]
+* $\beta_3 = 0.9470$ with 95% CI: [0.7999, 1.0941]
+
+It is clear to see that the parameter estimates are much closer to their true values, and the $\beta_1$ and $\beta_3$ estimate don't contain the true values of their parameters. Alternatively, the parameter estimate for $\beta_2$ still contains the true value of $\beta_2$.
+
+## Question 4c
+Here we impute the interaction variable as if it was *just another variable* and use this variable for the interaction term in step 2, and provide estimates for $\beta_1$, $\beta_2$, and $\beta_3$ along with 95% confidence intervals using using $M = 50$ and `seed=1`.
+```{r, fig.align='center'}
+# Imputing interaction term as just another variable
+imps_c = mice(dataex4, printFlag=FALSE, m=50, seed=1)
+# Predicting y with normal lm
+fit_c = with(imps_c, lm(y ~ x1 + x2 + x1x2))
+# Combining analyses to final estimates
+ests_c <- pool(fit_c)
+# Outputting summary statistics
+stats_c <- summary(ests_c, conf.int=TRUE)[, c(2, 7, 8)]
+rownames(stats_c) = c("beta0", "beta1", "beta2", "beta3")
+stats_c
+```
+This method yields the most accurate estimates, as well as produces 95% CIs containing the true values for all three parameters $\beta_1$, $\beta_2$ and $\beta_3$. Therefore we can conclude that the *just another variable* method is the most effective method of imputation.
+
+## Question 5
+Taking a first look at the data we see that there are 500 rows each representing individuals, and 12 variables.
+```{r, fig.align='center'}
+# Loading dataset
+load("NHANES2.Rdata")
+# Inspecting the nature of the variables and checking they are correctly coded
+str(NHANES2)
+# Inspecting the dimensions of the dataset
+dim(NHANES2)
+```
+Using the command summary we can have a quick idea about min/max/mean/quantiles of the
+observed data in each variable along with the number of missing values.
+```{r, fig.align='center'}
+# Obtaining summary statistics
+summary(NHANES2)
+```
+Inspecting the missing data patterns through visualization functions using the `JointAI` package, we produce the plot below:
+```{r, fig.align='center'}
+# Producing missing data pattern plot
+require(JointAI)
+md_pattern(NHANES2, pattern = FALSE, color = c('#34111b', '#e30f41'))
+```
+
+We can conclude that there are 411 cases with observed values on all 12 variables (i.e. 89 cases with missing values). Also, there are 29 observations for which  `bili` (*bilirubin concentration*), `HDL` (*high-density lipoprotein cholesterol*) and `chol` (*total serum cholesterol*) are missing. Additionally, 10 observations for which only the `WC` (*waist circumference*) is missing.
+
+Concerning the variables in the model for the analysis of interest, `wgt` (*weight*), `gender` and `age` are all fully observed across the 500 cases. As for the variables with missing valuse, there are 11 missing values for `hgt` (*height*) and 23 missing values for `WC` (*waist circumference*). 
+
+As a further check, we can also look at the correlations between variables.
+```{r, fig.align='center'}
+# Mutating factor variables gender, race, and hypten as numeric values
+corr_numeric = NHANES2 %>% mutate_if(is.factor, as.numeric)
+# Creating correlation matrix
+corr_matrix = cor(corr_numeric, method="pearson", use="complete.obs")
+# Creating correlogram
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corrplot(corr_matrix, method = "color", col = col(200),
+         type = "upper", order = "hclust", number.cex = .7,
+         # Adding coefficient of correlation
+         addCoef.col = "black",
+         # Setting text label color and rotation
+         tl.col = "black", tl.srt = 90,
+         # Combining with significance level
+         sig.level = 0.01, insig = "blank", 
+         # Hiding correlation coefficient on the principal diagonal
+         diag = FALSE)
+```
+
+It's clear from the correlogram above that the variables `hgt` (*height*) and `gender` have a significant negative correlatation, which is to be expected. Additionally, the strong correlation between the variables `wgt` (*weight*) and `WC` (*waist circumference*) is unsurprising. Another example of a significant positive correlatation is between the variables `SBP` (*systolic blood pressure*) and `hypten` (*hypertensive status*), which is also to be expected considering the condition 'hypertension' is a synonym for high blood pressure. 
+
+Using the `JointAI` we can visualise how the observed parts of the incomplete variables are distributed.
+```{r, fig.height=5, fig.width=5, fig.align='center'}
+# Producing distribution plots for each variable
+par(mar = c(3, 3, 2, 1), mgp = c(2, 0.6, 0))
+plot_all(NHANES2, breaks = 30, ncol = 4, fill = '#59C7EB')
+```
+
+The continuous variables `wgt` (*weight*), `bili` (*biliruben*), `chol` (*total serum cholesterol*) and `SBP` (*systolic blood pressure*) appear to be strongly positively skewed, with the variable `WC` (*waist circumference*) also displaying a positive skew however not as strong of a skew. Because a majority of the continuous variables are positively skewed, predictive mean matching is an appropriate method of choice for imputation.
+
+Alternatively, the variable `hgt` (*height*) portrays an approximately normal distribution. Let us then change the default imputation method from pmm to norm for the variable `hgt`.
+```{r, fig.align='center'}
+# Imputing with 0 iterations
+imp_ex5_0 <- mice(NHANES2, maxit = 0)
+imp_ex5_0
+# Extracting the method
+meth_ex5_0 <- imp_ex5_0$method
+meth_ex5_0["hgt"] <- "norm"
+```
+We can observe in the predictor matrix that each variable imputes on every other variable. Additionally, we can observe that the factor variables `educ` (*educational status*) and `hypten` (*hypertensive status*) use the appropriate imputation methods `polr` and `logreg` respectively.
+
+Because we do not want to risk imputing a negative value for height, we use the argument post() to create bounds on all imputed values of `hgt` outside the interval (1, 2).
+```{r, fig.align='center'}
+post <- imp_ex5_0$post
+post["hgt"] <- "imp[[j]][,i] <- squeeze(imp[[j]][,i], c(0.5, 2.8))"
+```
+
+We now can begin multiple imputation using `maxit = 20` and $M = 20$ in order to produce sufficiently accurate estimates while not being computationally inefficient.
+```{r}
+# Imputing with maxit = 20 and M = 30
+imp_ex5 <- mice(NHANES2, printFlag = FALSE, maxit = 20, m = 20, seed = 1)
+#Checking for problems during imputation
+imp_ex5$loggedEvents
+```
+The result is `NULL`, therefore we can conclude that there were no problems detected during the imputation process.
+
+We now proceed to check the mixing of each variable (i.e. check that each variable reaches convergence).
+```{r, fig.height=7, fig.width=7, fig.align='center'}
+# Observing convergence and mixing of variables
+plot(imp_ex5, layout = c(2,8))
+```
+
+There doesn't appear to be any obvious patterns in the chains for each variable and the data seems to be mixing very well, implying that each variable converges without any problems.
+
+Now that we know that the iterative algorithm appears to have converged for all variables that were imputed, we can compare the distribution of the imputed values against the distribution of the observed values. We start doing that for the continuous variables.
+```{r, fig.height=5, fig.width=5, fig.align='center'}
+densityplot(imp_ex5)
+```
+
+We can observe that the imputed values of each variable follow a similar distribution to the observed values for that variable, except for the variable `hgt` in which the imputed values display a strong positive skew whereas the observed values for `hgt` follow an approximately normal distribution.
+
+We investigate if such differences in the two distributions for `hgt` (observed versus imputed) can be explained by other variables. An obvious result would be that `hgt` is affected by the variable `gender`, so in order to find more interesting results we can check `hgt` conditional on the hypertensive status `hypten`.
+```{r, fig.align='center'}
+densityplot(imp_ex5, ~hgt|hypten)
+```
+
+We can observe that the hypertensive status of an individual does not necessarily explain the differences between the observed and imputed values for `hgt`, since the density of the imputed values do not follow a similar distribution to the observed values.
+
+Having confirmed that our imputation step was successful, we can proceed to the analysis of the imputed
+data by analyzing the fit of the model of interest.
+```{r, fig.align='center'}
+# Defining the substantive model of interest
+fit_ex5 <- with(imp_ex5, lm(wgt ~ gender + age + hgt + WC))
+# Observing the summary of the fitted model in the first imputed dataset
+summary(fit_ex5$analyses[[1]])
+```
+Proceeding with model specification/validation:
+```{r, fig.align='center'}
+plot(fit_ex5$analyses[[1]]$fitted.values, residuals(fit_ex5$analyses[[1]]),
+xlab = "Fitted values", ylab = "Residuals")
+```
+
+In this fitted values versus residuals plot we can observe a "fanning" pattern from left to right indicating heteroscedasticity is present (i.e. variability in the response is changing as the predicted value increases). Therefore, the homoscedastic assumption is violated.
+
+We can also produce a QQ-plot and nothing looks suspicious.
+```{r, fig.align='center'}
+qqnorm(rstandard(fit_ex5$analyses[[1]]), xlim = c(-4, 4), ylim = c(-6, 6))
+qqline(rstandard(fit_ex5$analyses[[1]]), col = 2)
+```
+
+The points form a line that is roughly straight and doesn't deviate from the regression line too much.
+
+Finally, pooling the results:
+```{r, fig.align='center'}
+pooled_ests <- pool(fit_ex5)
+final <- summary(pooled_ests, conf.int = TRUE)[c(1,2,7,8)]
+final
+```
+Calculating the pooled (adjusted) $R^2$:
+```{r, fig.align='center'}
+#r-squared for pooled imputation  
+pool.r.squared(fit_ex5, adjusted = TRUE)
+```
+
